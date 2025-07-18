@@ -6,6 +6,8 @@ import torch
 import numpy as np
 import random
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
+from ray.rllib.algorithms.ppo import PPOConfig
+
 
 def config_gru():
 	from popgym.baselines.ray_models.ray_gru import GRU
@@ -215,24 +217,41 @@ if __name__ == '__main__':
 		config = config_ffm()
 	elif args.model == "shm":
 		config = config_shm()
-	        
-	config["api_stack"] = {
-		"enable_rl_module_and_learner": False,
-		"enable_env_runner_and_connector_v2": False
-	}
+
+	ppo_config = (
+	        PPOConfig()
+	        .training(
+	            gamma=0.99,
+	            vf_loss_coeff=1.0,
+	            sgd_minibatch_size=config["sgd_minibatch_size"],
+	            train_batch_size=config["train_batch_size"],
+	        )
+	        .environment(env=config["env"])
+	        .rollouts(
+	            num_rollout_workers=config["num_workers"],
+	            num_envs_per_worker=config["num_envs_per_worker"],
+	            rollout_fragment_length=config["rollout_fragment_length"],
+	            horizon=config["horizon"],
+	            batch_mode=config["batch_mode"],
+	        )
+	        .framework(config["framework"])
+	        .resources(num_gpus=config["num_gpus"])
+	        .debugging(seed=42)
+	        # Устанавливаем модель
+	        .model(config["model"])
+	        # Вот ключевая строка для отключения нового API
+	        .api_stack(
+	            enable_rl_module_and_learner=False,
+	            enable_env_runner_and_connector_v2=False,
+	        )
+	    )
 	
 	ngpu = 1
-	if args.gpu==0 or not torch.cuda.is_available():
+	if args.gpu == 0 or not torch.cuda.is_available():
 		args.fgpu = 0
 		ngpu = 0
-			
+	        
 	ray.init(ignore_reinit_error=True, num_cpus=10, num_gpus=ngpu)
-
-	#for avoiding migration on new API
-	AlgorithmConfig._enable_rl_module_api = False
-	AlgorithmConfig._enable_learner_api = False
-	#----------------------------------
-	
 	ray.tune.run("PPO", config=config, 
 				num_samples = args.nrun, 
 				stop={"timesteps_total": 15_000_000},
