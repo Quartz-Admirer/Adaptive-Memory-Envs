@@ -47,6 +47,7 @@ def config_gru():
             "enable_rl_module_and_learner": False,
             "enable_env_runner_and_connector_v2": False
 	},
+	},
 	"num_gpus": args.fgpu,
 	"num_workers": 2,
 	# Some other rllib defaults you might want to change
