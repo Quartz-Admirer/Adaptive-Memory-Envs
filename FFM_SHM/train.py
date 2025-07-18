@@ -227,12 +227,12 @@ if __name__ == '__main__':
         PPOConfig()
         .environment(
             env=config_dict["env"],
+	    horizon=config_dict["horizon"],
         )
         .framework(config_dict["framework"])
         .env_runners(
             num_env_runners=config_dict["num_workers"],
             rollout_fragment_length=config_dict["rollout_fragment_length"],
-            horizon=config_dict["horizon"],
             batch_mode=config_dict["batch_mode"],
             # num_envs_per_worker можно добавить, если нужно
         )
