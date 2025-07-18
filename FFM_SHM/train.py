@@ -5,6 +5,7 @@ import argparse
 import torch
 import numpy as np
 import random
+from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
 
 def config_gru():
 	from popgym.baselines.ray_models.ray_gru import GRU
@@ -190,11 +191,6 @@ if __name__ == '__main__':
 	
 	parser = argparse.ArgumentParser(description='Popgym Benchmark')
 
-	#for avoiding migration on new API
-    	from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
-    	AlgorithmConfig._enable_rl_module_api = False
-    	AlgorithmConfig._enable_learner_api = False
-
 	# basic config
 	parser.add_argument('--env', type=str,  default='AutoencodeEasy')
 	parser.add_argument('--model', type=str,  default='gru')
@@ -227,6 +223,12 @@ if __name__ == '__main__':
 		ngpu = 0
 			
 	ray.init(ignore_reinit_error=True, num_cpus=10, num_gpus=ngpu)
+
+	#for avoiding migration on new API
+    	AlgorithmConfig._enable_rl_module_api = False
+    	AlgorithmConfig._enable_learner_api = False
+	#----------------------------------
+	
 	ray.tune.run("PPO", config=config, 
 				num_samples = args.nrun, 
 				stop={"timesteps_total": 15_000_000},
