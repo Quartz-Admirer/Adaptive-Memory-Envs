@@ -227,7 +227,6 @@ if __name__ == '__main__':
         PPOConfig()
         .environment(
             env=config_dict["env"],
-	    horizon=config_dict["horizon"],
         )
         .framework(config_dict["framework"])
         .env_runners(
@@ -257,6 +256,7 @@ if __name__ == '__main__':
     )
 
     # 4. Устанавливаем специфичный для PPO параметр ОТДЕЛЬНО
+    ppo_config.horizon = config_dict["horizon"]
     ppo_config.sgd_minibatch_size = config_dict["sgd_minibatch_size"]
 
     # 5. Инициализируем Ray
