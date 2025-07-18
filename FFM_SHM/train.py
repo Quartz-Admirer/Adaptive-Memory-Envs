@@ -1,13 +1,22 @@
+# ШАГ 1: Все импорты находятся наверху
+import argparse
 import popgym
 import ray
-from torch import nn
-import argparse
 import torch
-# КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Импортируем класс под уникальным именем
-from ray.rllib.algorithms.ppo import PPOConfig as RllibPPOConfig
+from torch import nn
 
-def config_gru():
-    from popgym.baselines.ray_models.ray_gru import GRU
+# Импортируем модели из popgym
+from popgym.baselines.ray_models.ray_gru import GRU
+from popgym.baselines.ray_models.ray_ffm import RayFFM
+from popgym.baselines.ray_models.ray_shm import SHMAgent
+
+# КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Импортируем PPOConfig под защищенным именем,
+# чтобы popgym не мог его перезаписать.
+from ray.rllib.algorithms.ppo import PPOConfig as RLLIB_PPOConfig
+
+# --- Функции конфигурации (без импортов внутри) ---
+
+def config_gru(args):
     bptt_size = 1024
     config = {
         "model": {
@@ -37,8 +46,7 @@ def config_gru():
     }
     return config
 
-def config_ffm():
-    from popgym.baselines.ray_models.ray_ffm import RayFFM
+def config_ffm(args):
     bptt_size = 1024
     config = {
         "model": {
@@ -70,8 +78,7 @@ def config_ffm():
     }
     return config
 
-def config_shm():
-    from popgym.baselines.ray_models.ray_shm import SHMAgent
+def config_shm(args):
     bptt_size = 1024
     config = {
         "model": {
@@ -104,6 +111,7 @@ def config_shm():
     }
     return config
 
+# --- Основной блок ---
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Popgym Benchmark')
     parser.add_argument('--env', type=str, default='AutoencodeEasy')
@@ -118,18 +126,18 @@ if __name__ == '__main__':
     args.fgpu = 1.0 / args.nrun if args.gpu > 0 else 0
 
     if args.model == "gru":
-        config_dict = config_gru()
+        config_dict = config_gru(args)
     elif args.model == "ffm":
-        config_dict = config_ffm()
+        config_dict = config_ffm(args)
     elif args.model == "shm":
-        config_dict = config_shm()
+        config_dict = config_shm(args)
     else:
         raise ValueError(f"Unknown model: {args.model}")
 
-    # Используем новое, уникальное имя RllibPPOConfig
+    # Используем наше защищенное имя для создания объекта
     algo_config = (
-        RllibPPOConfig()
-        .environment(env=config_dict["env"])
+        RLLIB_PPOConfig()
+        .environment(env=config_dict["env"], horizon=config_dict["horizon"])
         .framework(config_dict["framework"])
         .env_runners(
             num_env_runners=config_dict["num_workers"],
@@ -141,6 +149,7 @@ if __name__ == '__main__':
             lr=5e-5,
             vf_loss_coeff=1.0,
             train_batch_size=config_dict["train_batch_size"],
+            sgd_minibatch_size=config_dict["sgd_minibatch_size"],
         )
         .resources(num_gpus=config_dict["num_gpus"])
         .debugging(seed=42)
@@ -150,9 +159,6 @@ if __name__ == '__main__':
             enable_env_runner_and_connector_v2=False,
         )
     )
-
-    algo_config.horizon = config_dict["horizon"]
-    algo_config.sgd_minibatch_size = config_dict["sgd_minibatch_size"]
 
     num_gpus_for_ray = 1 if args.gpu > 0 and torch.cuda.is_available() else 0
     ray.init(ignore_reinit_error=True, num_cpus=10, num_gpus=num_gpus_for_ray)
