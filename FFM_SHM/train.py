@@ -194,65 +194,80 @@ def config_shm():
 	
 
 if __name__ == '__main__':
-	
-	parser = argparse.ArgumentParser(description='Popgym Benchmark')
+    parser = argparse.ArgumentParser(description='Popgym Benchmark')
 
-	# basic config
-	parser.add_argument('--env', type=str,  default='AutoencodeEasy')
-	parser.add_argument('--model', type=str,  default='gru')
-	parser.add_argument('--nrun', type=int,  default=3)
-	parser.add_argument('--bscale', type=float,  default=1.0)
-	# parser.add_argument('--fgpu', type=float,  default=0.3)
-	parser.add_argument('--h', type=int,  default=64)#hidden size
-	parser.add_argument('--m', type=int,  default=72)#H in the paper
-	parser.add_argument('--gpu', type=int,  default=1)
-	parser.add_argument('--post_size', type=int,  default=1024)
-	args = parser.parse_args()
-	args.fgpu = 1.0/args.nrun
+    # --- Конфигурация из командной строки ---
+    parser.add_argument('--env', type=str, default='AutoencodeEasy')
+    parser.add_argument('--model', type=str, default='gru')
+    parser.add_argument('--nrun', type=int, default=3)
+    parser.add_argument('--bscale', type=float, default=1.0)
+    parser.add_argument('--h', type=int, default=64) # hidden size
+    parser.add_argument('--m', type=int, default=72) # H in the paper
+    parser.add_argument('--gpu', type=int, default=1)
+    parser.add_argument('--post_size', type=int, default=1024)
+    args = parser.parse_args()
+    args.fgpu = 1.0 / args.nrun if args.gpu > 0 else 0
 
-	print(args)
-	if args.model == "gru":
-	        config = config_gru()
-	elif args.model == "ffm":
-		config = config_ffm()
-	elif args.model == "shm":
-		config = config_shm()
+    print("Запускаем с аргументами:", args)
 
-	ppo_config = (
-	        PPOConfig()
-	        .training(
-	            gamma=0.99,
-	            vf_loss_coeff=1.0,
-	            sgd_minibatch_size=config["sgd_minibatch_size"],
-	            train_batch_size=config["train_batch_size"],
-	        )
-	        .environment(env=config["env"])
-	        .rollouts(
-	            num_rollout_workers=config["num_workers"],
-	            num_envs_per_worker=config["num_envs_per_worker"],
-	            rollout_fragment_length=config["rollout_fragment_length"],
-	            horizon=config["horizon"],
-	            batch_mode=config["batch_mode"],
-	        )
-	        .framework(config["framework"])
-	        .resources(num_gpus=config["num_gpus"])
-	        .debugging(seed=42)
-	        # Устанавливаем модель
-	        .model(config["model"])
-	        # Вот ключевая строка для отключения нового API
-	        .api_stack(
-	            enable_rl_module_and_learner=False,
-	            enable_env_runner_and_connector_v2=False,
-	        )
-	    )
-	
-	ngpu = 1
-	if args.gpu == 0 or not torch.cuda.is_available():
-		args.fgpu = 0
-		ngpu = 0
-	        
-	ray.init(ignore_reinit_error=True, num_cpus=10, num_gpus=ngpu)
-	ray.tune.run("PPO", config=config, 
-				num_samples = args.nrun, 
-				stop={"timesteps_total": 15_000_000},
-				storage_path=f"file:///home/jovyan/persistent_volume/results/{args.env}/{args.model}/")
+    # 1. Получаем базовый словарь конфигурации в зависимости от модели
+    if args.model == "gru":
+        config_dict = config_gru()
+    elif args.model == "ffm":
+        config_dict = config_ffm()
+    elif args.model == "shm":
+        config_dict = config_shm()
+    else:
+        raise ValueError(f"Неизвестная модель: {args.model}")
+
+
+    # 2. Создаем и настраиваем объект PPOConfig
+    # Это современный и надежный способ
+    ppo_config = (
+        PPOConfig()
+        .environment(
+            env=config_dict["env"],
+        )
+        .framework(config_dict["framework"])
+        .rollouts(
+            num_rollout_workers=config_dict["num_workers"],
+            rollout_fragment_length=config_dict["rollout_fragment_length"],
+            horizon=config_dict["horizon"],
+            batch_mode=config_dict["batch_mode"],
+            # num_envs_per_worker можно добавить, если нужно
+        )
+        .training(
+            # Общие параметры PPO
+            gamma=0.99, # Можно вынести в config_dict, если нужно
+            lr=5e-5,    # Можно вынести в config_dict, если нужно
+            vf_loss_coeff=1.0,
+            train_batch_size=config_dict["train_batch_size"],
+            # sgd_minibatch_size убран отсюда, чтобы избежать ошибки
+        )
+        .resources(
+            num_gpus=args.fgpu,
+        )
+        .debugging(seed=42)
+        .model(config_dict["model"])
+        # 3. КЛЮЧЕВОЙ МОМЕНТ: отключаем новый API для совместимости
+        .api_stack(
+            enable_rl_module_and_learner=False,
+            enable_env_runner_and_connector_v2=False,
+        )
+    )
+
+    # 4. Устанавливаем специфичный для PPO параметр ОТДЕЛЬНО
+    ppo_config.sgd_minibatch_size = config_dict["sgd_minibatch_size"]
+
+    # 5. Инициализируем Ray
+    num_gpus_for_ray = 1 if args.gpu > 0 and torch.cuda.is_available() else 0
+    ray.init(ignore_reinit_error=True, num_cpus=10, num_gpus=num_gpus_for_ray)
+
+    # 6. Запускаем обучение, используя новый объект ppo_config
+    ray.tune.run(
+        "PPO",
+        config=ppo_config, # <--- ВАЖНО: используем ppo_config, а не старый dict
+        num_samples=args.nrun,
+        stop={"timesteps_total": 15_000_000},
+        storage_path=f"/home/jovyan/persistent_volume/results/{args.env}/{args.model}/",
+    )
