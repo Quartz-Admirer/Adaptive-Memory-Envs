@@ -43,6 +43,9 @@ def config_gru():
 		# We can also override GRU-specific hyperparams
 		"num_recurrent_layers": 1,
 		},
+	"api_stack": {
+            "enable_rl_module_and_learner": False,
+            "enable_env_runner_and_connector_v2": False
 	},
 	"num_gpus": args.fgpu,
 	"num_workers": 2,
