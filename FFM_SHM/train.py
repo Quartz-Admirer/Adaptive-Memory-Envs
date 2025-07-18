@@ -225,8 +225,8 @@ if __name__ == '__main__':
 	ray.init(ignore_reinit_error=True, num_cpus=10, num_gpus=ngpu)
 
 	#for avoiding migration on new API
-    	AlgorithmConfig._enable_rl_module_api = False
-    	AlgorithmConfig._enable_learner_api = False
+	AlgorithmConfig._enable_rl_module_api = False
+	AlgorithmConfig._enable_learner_api = False
 	#----------------------------------
 	
 	ray.tune.run("PPO", config=config, 
