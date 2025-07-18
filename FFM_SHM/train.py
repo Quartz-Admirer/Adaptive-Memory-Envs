@@ -204,21 +204,21 @@ if __name__ == '__main__':
 	args.fgpu = 1.0/args.nrun
 
 	print(args)
-
-	if args.model=="gru":
-		config = config_gru()
-	elif args.model=="ffm":
+	if args.model == "gru":
+	        config = config_gru()
+	elif args.model == "ffm":
 		config = config_ffm()
-	elif args.model=="shm":
+	elif args.model == "shm":
 		config = config_shm()
-	ngpu = 1
-	if args.gpu==0 or not torch.cuda.is_available():
-		args.fgpu = 0
-		ngpu = 0
+	        
+	config["api_stack"] = {
+		"enable_rl_module_and_learner": False,
+		"enable_env_runner_and_connector_v2": False
+	}
 			
 	ray.init(ignore_reinit_error=True, num_cpus=10, num_gpus=ngpu)
 	ray.tune.run("PPO", config=config, 
 				num_samples = args.nrun, 
 				stop={"timesteps_total": 15_000_000},
-				local_dir=f"./results/{args.env}/{args.model}/")
+				storage_path=f"file:///home/jovyan/persistent_volume/results/{args.env}/{args.model}/")
 
