@@ -215,6 +215,11 @@ if __name__ == '__main__':
 		"enable_rl_module_and_learner": False,
 		"enable_env_runner_and_connector_v2": False
 	}
+	
+	ngpu = 1
+	if args.gpu==0 or not torch.cuda.is_available():
+		args.fgpu = 0
+		ngpu = 0
 			
 	ray.init(ignore_reinit_error=True, num_cpus=10, num_gpus=ngpu)
 	ray.tune.run("PPO", config=config, 
