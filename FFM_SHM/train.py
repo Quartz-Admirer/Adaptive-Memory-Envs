@@ -190,6 +190,11 @@ if __name__ == '__main__':
 	
 	parser = argparse.ArgumentParser(description='Popgym Benchmark')
 
+	#for avoiding migration on new API
+    	from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
+    	AlgorithmConfig._enable_rl_module_api = False
+    	AlgorithmConfig._enable_learner_api = False
+
 	# basic config
 	parser.add_argument('--env', type=str,  default='AutoencodeEasy')
 	parser.add_argument('--model', type=str,  default='gru')
@@ -226,4 +231,3 @@ if __name__ == '__main__':
 				num_samples = args.nrun, 
 				stop={"timesteps_total": 15_000_000},
 				storage_path=f"file:///home/jovyan/persistent_volume/results/{args.env}/{args.model}/")
-
