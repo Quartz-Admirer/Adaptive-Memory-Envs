@@ -201,8 +201,8 @@ if __name__ == '__main__':
     parser.add_argument('--model', type=str, default='gru')
     parser.add_argument('--nrun', type=int, default=3)
     parser.add_argument('--bscale', type=float, default=1.0)
-    parser.add_argument('--h', type=int, default=64) # hidden size
-    parser.add_argument('--m', type=int, default=72) # H in the paper
+    parser.add_argument('--h', type=int, default=64)
+    parser.add_argument('--m', type=int, default=72)
     parser.add_argument('--gpu', type=int, default=1)
     parser.add_argument('--post_size', type=int, default=1024)
     args = parser.parse_args()
@@ -210,7 +210,7 @@ if __name__ == '__main__':
 
     print("Запускаем с аргументами:", args)
 
-    # 1. Получаем базовый словарь конфигурации в зависимости от модели
+    # 1. Получаем базовый словарь конфигурации
     if args.model == "gru":
         config_dict = config_gru()
     elif args.model == "ffm":
@@ -220,53 +220,50 @@ if __name__ == '__main__':
     else:
         raise ValueError(f"Неизвестная модель: {args.model}")
 
+    # 2. Создаем и настраиваем объект конфигурации ПОШАГОВО
+    
+    # Создаем пустой объект. Если ошибка здесь, значит PPOConfig перезаписан.
+    algo_config = PPOConfig()
 
-    # 2. Создаем и настраиваем объект PPOConfig
-    # Это современный и надежный способ
-    ppo_config = (
-        PPOConfig()
-        .environment(
-            env=config_dict["env"],
-        )
-        .framework(config_dict["framework"])
-        .env_runners(
-            num_env_runners=config_dict["num_workers"],
-            rollout_fragment_length=config_dict["rollout_fragment_length"],
-            batch_mode=config_dict["batch_mode"],
-            # num_envs_per_worker можно добавить, если нужно
-        )
-        .training(
-            # Общие параметры PPO
-            gamma=0.99, # Можно вынести в config_dict, если нужно
-            lr=5e-5,    # Можно вынести в config_dict, если нужно
-            vf_loss_coeff=1.0,
-            train_batch_size=config_dict["train_batch_size"],
-            # sgd_minibatch_size убран отсюда, чтобы избежать ошибки
-        )
-        .resources(
-            num_gpus=args.fgpu,
-        )
-        .debugging(seed=42)
-        .model(config_dict["model"])
-        # 3. КЛЮЧЕВОЙ МОМЕНТ: отключаем новый API для совместимости
-        .api_stack(
-            enable_rl_module_and_learner=False,
-            enable_env_runner_and_connector_v2=False,
-        )
+    # Настраиваем по частям
+    algo_config = algo_config.environment(env=config_dict["env"])
+    algo_config = algo_config.framework(config_dict["framework"])
+    algo_config = algo_config.env_runners(
+        num_env_runners=config_dict["num_workers"],
+        rollout_fragment_length=config_dict["rollout_fragment_length"],
+        batch_mode=config_dict["batch_mode"],
+    )
+    algo_config = algo_config.training(
+        gamma=0.99,
+        lr=5e-5,
+        vf_loss_coeff=1.0,
+        train_batch_size=config_dict["train_batch_size"],
+    )
+    algo_config = algo_config.resources(num_gpus=args.fgpu)
+    algo_config = algo_config.debugging(seed=42)
+    
+    # Распаковываем словарь модели с помощью **
+    algo_config = algo_config.model(**config_dict["model"])
+    
+    # Отключаем новый API
+    algo_config = algo_config.api_stack(
+        enable_rl_module_and_learner=False,
+        enable_env_runner_and_connector_v2=False,
     )
 
-    # 4. Устанавливаем специфичный для PPO параметр ОТДЕЛЬНО
-    ppo_config.horizon = config_dict["horizon"]
-    ppo_config.sgd_minibatch_size = config_dict["sgd_minibatch_size"]
+    # 3. Устанавливаем остальные параметры НАПРЯМУЮ
+    algo_config.horizon = config_dict["horizon"]
+    algo_config.sgd_minibatch_size = config_dict["sgd_minibatch_size"]
 
-    # 5. Инициализируем Ray
+    # Инициализируем Ray
     num_gpus_for_ray = 1 if args.gpu > 0 and torch.cuda.is_available() else 0
     ray.init(ignore_reinit_error=True, num_cpus=10, num_gpus=num_gpus_for_ray)
 
-    # 6. Запускаем обучение, используя новый объект ppo_config
+    # Запускаем обучение
+    print("Конфигурация завершена. Запускаем ray.tune.run...")
     ray.tune.run(
         "PPO",
-        config=ppo_config, # <--- ВАЖНО: используем ppo_config, а не старый dict
+        config=algo_config,
         num_samples=args.nrun,
         stop={"timesteps_total": 15_000_000},
         storage_path=f"/home/jovyan/persistent_volume/results/{args.env}/{args.model}/",
