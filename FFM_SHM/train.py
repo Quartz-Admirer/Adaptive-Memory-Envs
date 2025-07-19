@@ -5,14 +5,11 @@ import torch
 from torch import nn
 from ray.tune.registry import register_env
 
-# ВАШИ ПРАВИЛЬНЫЕ ИМПОРТЫ
 from popgym.baselines.ray_models.ray_gru import GRU
 from popgym.baselines.ray_models.ray_ffm import RayFFM
 from popgym.baselines.ray_models.ray_shm import SHMAgent
 from popgym.envs.endless_tmaze_env import EndlessTMazeGym
 
-# --- Функции конфигурации ---
-# ... (весь код для config_gru, config_ffm, config_shm остается здесь без изменений) ...
 def config_gru(args):
     bptt_size = 1024
     config = {
@@ -31,7 +28,7 @@ def config_gru(args):
         },
         "num_gpus": args.fgpu, "num_workers": 2, "sgd_minibatch_size": bptt_size * 8,
         "train_batch_size": bptt_size * 64, "rollout_fragment_length": bptt_size,
-        "framework": "torch", "horizon": bptt_size, "batch_mode": "complete_episodes",
+        "framework": "torch", "horizon": bptt_size, "batch_mode": "truncate_episodes",
         "gamma": 0.99, "lr": 5e-5, "vf_loss_coeff": 1.0,
     }
     return config
@@ -53,7 +50,7 @@ def config_ffm(args):
         },
         "num_gpus": args.fgpu, "num_workers": 2, "sgd_minibatch_size": bptt_size * 8,
         "train_batch_size": bptt_size * 64, "rollout_fragment_length": bptt_size,
-        "framework": "torch", "horizon": bptt_size, "batch_mode": "complete_episodes",
+        "framework": "torch", "horizon": bptt_size, "batch_mode": "truncate_episodes",
         "gamma": 0.99, "lr": 5e-5, "vf_loss_coeff": 1.0,
     }
     return config
@@ -79,11 +76,10 @@ def config_shm(args):
         "sgd_minibatch_size": int(bptt_size * 8 * args.bscale),
         "train_batch_size": int(bptt_size * 64 * args.bscale),
         "rollout_fragment_length": bptt_size, "framework": "torch", "horizon": bptt_size,
-        "batch_mode": "complete_episodes", "gamma": 0.99, "lr": 5e-5, "vf_loss_coeff": 1.0,
+        "batch_mode": "truncate_episodes", "gamma": 0.99, "lr": 5e-5, "vf_loss_coeff": 1.0,
     }
     return config
 
-# --- Основной блок ---
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Popgym Benchmark')
     parser.add_argument('--env', type=str, default='AutoencodeEasy')
@@ -97,11 +93,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.fgpu = 1.0 / args.nrun if args.gpu > 0 else 0
 
-    # ===== ГЛАВНОЕ ИСПРАВЛЕНИЕ: ИЗМЕНЯЕМ LAMBDA-ФУНКЦИЮ =====
-    # Мы игнорируем проблемный 'config' от Ray и создаем среду с параметрами по умолчанию.
-    register_env("EndlessTMazeGym-v0", lambda config: EndlessTMazeGym())
+    register_env("EndlessTMazeGym-v0", lambda config: EndlessTMazeGym(**config))
 
-    # Создаем базовый словарь конфигурации
     if args.model == "gru":
         config_dict = config_gru(args)
     elif args.model == "ffm":
@@ -111,11 +104,12 @@ if __name__ == '__main__':
     else:
         raise ValueError(f"Unknown model: {args.model}")
 
-    # Устанавливаем правильное имя среды
     if args.env == "EndlessTMazeEnv":
         config_dict["env"] = "EndlessTMazeGym-v0"
+        config_dict["env_config"] = {"corridor_length": 5, "num_corridors": 1}
     else:
         config_dict["env"] = f"popgym-{args.env}-v0"
+        config_dict["env_config"] = {}
 
     num_gpus_for_ray = 1 if args.gpu > 0 and torch.cuda.is_available() else 0
     ray.init(ignore_reinit_error=True, num_cpus=10, num_gpus=num_gpus_for_ray)
@@ -124,6 +118,6 @@ if __name__ == '__main__':
         "PPO",
         config=config_dict,
         num_samples=args.nrun,
-        stop={"timesteps_total": 15_000_000},
+        stop={"timesteps_total": 1_000_000},
         storage_path=f"/home/jovyan/persistent_volume/results/{args.env}/{args.model}/",
     )
