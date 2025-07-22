@@ -8,7 +8,11 @@ def get_config() -> Dict[str, Any]:
     config = {
         # --- Общие параметры для запуска ---
         "run_id_prefix": "ray_ppo_run",
+<<<<<<< HEAD
         "total_timesteps": 1_000,
+=======
+        "total_timesteps": 3_000_000,
+>>>>>>> d66b24a93c916909b4a2e39cc327f4f9108f917c
         
         # --- Конфигурации для обучения и валидации ---
         "train_env": {
@@ -35,4 +39,8 @@ def get_config() -> Dict[str, Any]:
             }
         }
     }
+<<<<<<< HEAD
     return config
+=======
+    return config
+>>>>>>> d66b24a93c916909b4a2e39cc327f4f9108f917c

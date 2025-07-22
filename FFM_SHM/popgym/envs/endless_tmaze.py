@@ -86,3 +86,4 @@ class EndlessTMaze:
     def get_state(self):
         hint_to_show = self.current_hint if self.x == 0 else 0
         return np.array([self.x, self.y, hint_to_show], dtype=np.float32)
+
