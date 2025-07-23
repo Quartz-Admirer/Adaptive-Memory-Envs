@@ -7,10 +7,9 @@ from torch import nn
 from ray.tune.registry import register_env
 from ray.rllib.algorithms.ppo import PPO
 
-# Импортируем наши компоненты
 from config import get_config
 from popgym.envs.endless_tmaze_env import EndlessTMazeGym
-# Модели из popgym, как в вашем оригинальном файле
+
 from popgym.baselines.ray_models.ray_gru import GRU
 from popgym.baselines.ray_models.ray_ffm import RayFFM
 from popgym.baselines.ray_models.ray_shm import SHMAgent
@@ -32,9 +31,8 @@ def build_model_config(cli_args):
     Эта функция восстанавливает логику из вашего оригинального train.py.
     """
     model_name = cli_args.model
-    bptt_size = 1024 # Константа из вашего конфига
+    bptt_size = 1024
     
-    # --- Логика построения конфига для каждой модели ---
     if model_name == "gru":
         custom_model_config = {
             "preprocessor_input_size": 128, "preprocessor_output_size": 64,
@@ -92,7 +90,7 @@ def train(cli_args, experiment_config):
         "gamma": 0.99,
         "lr": 5e-5,
         "vf_loss_coeff": 1.0,
-        "model": build_model_config(cli_args), # <--- ИСПРАВЛЕНИЕ ЗДЕСЬ
+        "model": build_model_config(cli_args),
         "env": "EndlessTMazeGym-v0",
         "env_config": experiment_config["train_env"],
     }
