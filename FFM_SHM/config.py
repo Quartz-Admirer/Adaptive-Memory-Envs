@@ -6,15 +6,9 @@ def get_config() -> Dict[str, Any]:
     Возвращает полную конфигурацию для эксперимента с ray.tune.
     """
     config = {
-        # --- Общие параметры для запуска ---
         "run_id_prefix": "ray_ppo_run",
-<<<<<<< HEAD
         "total_timesteps": 1_000,
-=======
-        "total_timesteps": 3_000_000,
->>>>>>> d66b24a93c916909b4a2e39cc327f4f9108f917c
-        
-        # --- Конфигурации для обучения и валидации ---
+
         "train_env": {
             "num_corridors": 5,
             "penalty": -0.01,
@@ -27,7 +21,7 @@ def get_config() -> Dict[str, Any]:
         },
 
         "validation": {
-            "enabled": True, # Этот флаг пока не используется, но оставлен для будущих расширений
+            "enabled": True,
             "env": {
                 "num_corridors": 5,
                 "penalty": -0.01,
@@ -39,8 +33,5 @@ def get_config() -> Dict[str, Any]:
             }
         }
     }
-<<<<<<< HEAD
     return config
-=======
-    return config
->>>>>>> d66b24a93c916909b4a2e39cc327f4f9108f917c
+
