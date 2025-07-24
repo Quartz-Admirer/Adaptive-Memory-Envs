@@ -2,6 +2,10 @@
 #        YAML-конфигурация для GTrXL PPO
 # ---------------------------------------------------
 
+# --- Общие параметры ---
+run_id: "gtrl_3_cor_fixed_5"
+n_runs: 3
+
 # Общие параметры, используемые по умолчанию
 defaults:
   gamma: 0.995
@@ -68,6 +72,8 @@ validation:
   enabled: True         # Включить/выключить валидацию
   val_every: 10         # Запускать валидацию каждые 10 обновлений
   # Параметры для среды валидации
+  n_eval_episodes: 100
+  best_model_metric: "success_mean"
   env:
     num_corridors: 3
     penalty: -0.01
