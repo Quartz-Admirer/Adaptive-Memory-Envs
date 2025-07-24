@@ -23,19 +23,11 @@ class PPOTrainer:
         self.run_id = run_id
         
         # --- Адаптивная загрузка конфигурации ---
-        # Проверяем, используется ли вложенная структура с 'defaults'
         if "defaults" in config:
-            print("Detected nested config structure with 'defaults'.")
-            self.defaults_config = config["defaults"]
-            self.train_env_config = config["train_env"]
-            # Гиперпараметры PPO
-            self.ppo_config = self.defaults_config
+            self.ppo_config = config["defaults"]
         else:
-            print("Detected flat config structure.")
-            # Используем весь config как источник параметров для PPO
             self.ppo_config = config
-            # Среда находится в ключе 'environment'
-            self.train_env_config = config["environment"]
+        self.train_env_config = config["train_env"]
 
         # --- Извлечение параметров ---
         self.num_workers = self.ppo_config["n_workers"]
@@ -66,7 +58,6 @@ class PPOTrainer:
         dummy_env.close()
 
         print("Step 2: Init buffer")
-        # Буферу нужны n_workers, worker_steps, которые теперь в self.ppo_config
         self.buffer = Buffer(self.config, observation_space, self.action_space_shape, self.max_episode_length, self.device)
 
         print("Step 3: Init model and optimizer")
@@ -87,6 +78,13 @@ class PPOTrainer:
         self.memory_mask = torch.tril(torch.ones((self.memory_length, self.memory_length)), diagonal=-1)
         self.memory_indices = self._create_memory_indices()
 
+        # --- Логика для чекпоинтинга лучшей модели ---
+        if self.validation_config.get("enabled", False):
+            self.best_metric_value = -np.inf
+            self.metric_to_track = self.validation_config.get("best_model_metric", "reward_mean")
+            self.best_model_path = f"./models/best_model_{self.run_id}.nn"
+            print(f"Checkpointing enabled. Tracking metric: '{self.metric_to_track}'. Best model will be saved to {self.best_model_path}")
+
     def _create_memory_indices(self) -> torch.Tensor:
         """Создает тензор для индексации скользящего окна памяти."""
         if self.max_episode_length <= self.memory_length:
@@ -103,7 +101,14 @@ class PPOTrainer:
 
         for update in range(self.ppo_config["updates"]):
             if self.validation_config.get("enabled", False) and update > 0 and update % self.validation_config.get("val_every", 50) == 0:
-                self.run_validation(model=self.model, update_step=update)
+                val_metrics = self.run_validation(model=self.model, update_step=update)
+                
+                # Логика сохранения лучшей модели
+                current_metric = val_metrics.get(self.metric_to_track)
+                if current_metric is not None and current_metric > self.best_metric_value:
+                    self.best_metric_value = current_metric
+                    print(f"\nNew best model found! {self.metric_to_track}: {current_metric:.3f}. Saving model to {self.best_model_path}...\n")
+                    self._save_model(path=self.best_model_path)
 
             learning_rate = polynomial_decay(self.lr_schedule["initial"], self.lr_schedule["final"], self.lr_schedule["max_decay_steps"], self.lr_schedule["power"], update)
             beta = polynomial_decay(self.beta_schedule["initial"], self.beta_schedule["final"], self.beta_schedule["max_decay_steps"], self.beta_schedule["power"], update)
@@ -117,36 +122,42 @@ class PPOTrainer:
                 training_stats = np.mean(training_stats, axis=0)
             
             episode_infos.extend(sampled_episode_info)
-            self._log_stats(update, training_stats, process_episode_info(episode_infos), grad_info)
+            processed_info = process_episode_info(episode_infos)
+            self._log_stats(update, training_stats, processed_info, grad_info)
 
-        self._save_model()
+        print("Training complete. Best model saved via checkpointing.")
 
-    def run_validation(self, model_path: str = None, model: ActorCriticModel = None, update_step: int = 0) -> None:
-        # ... (Этот метод остается без изменений) ...
+    def run_validation(self, model_path: str = None, model: ActorCriticModel = None, update_step: int = 0) -> dict:
+        """
+        Запускает валидацию и возвращает словарь с посчитанными метриками.
+        """
         print("\n--- Running Validation ---")
         
         val_env_config = self.validation_config.get("env")
         if not val_env_config:
             print("Warning: 'validation.env' configuration not found. Skipping validation.")
-            self.model.train()
-            return
+            return {}
+
+        n_eval_episodes = self.validation_config.get("n_eval_episodes", 100)
 
         if model is None:
             if model_path and os.path.exists(model_path):
-                state_dict, _ = pickle.load(open(model_path, "rb"))
-                self.model.load_state_dict(state_dict)
+                state_dict, config = pickle.load(open(model_path, "rb"))
+                dummy_env = create_env(config["train_env"])
+                model = ActorCriticModel(config, dummy_env.observation_space, (dummy_env.action_space.n,), dummy_env.max_episode_steps).to(self.device)
+                model.load_state_dict(state_dict)
+                dummy_env.close()
                 print(f"Loaded model from {model_path} for validation.")
             else:
                 print(f"Warning: Model file not found at {model_path}. Skipping validation.")
-                return
+                return {}
         
-        self.model.eval()
-
+        model.eval()
         val_env = create_env(val_env_config)
         
         episode_rewards, episode_lengths, episode_successes = [], [], []
 
-        for _ in range(100):
+        for _ in range(n_eval_episodes):
             obs, _ = val_env.reset()
             terminated, truncated = False, False
             
@@ -160,7 +171,7 @@ class PPOTrainer:
                     mem_mask_step = self.memory_mask[torch.clip(torch.tensor([current_step]), 0, self.memory_length - 1)].to(self.device)
                     sliced_memory = batched_index_select(memory, 1, mem_indices_step)
 
-                    policy, _, new_mem_item = self.model(obs_tensor, sliced_memory, mem_mask_step, mem_indices_step)
+                    policy, _, new_mem_item = model(obs_tensor, sliced_memory, mem_mask_step, mem_indices_step)
                     
                     memory[0, current_step] = new_mem_item.squeeze(0)
                     action = torch.stack([b.sample() for b in policy], dim=1).cpu().numpy()[0]
@@ -175,22 +186,26 @@ class PPOTrainer:
 
         val_env.close()
         
+        results = {}
         if episode_rewards:
-            mean_reward = np.mean(episode_rewards)
-            mean_length = np.mean(episode_lengths)
-            mean_success = np.mean(episode_successes)
+            results = {
+                "reward_mean": np.mean(episode_rewards),
+                "length_mean": np.mean(episode_lengths),
+                "success_mean": np.mean(episode_successes)
+            }
             
-            self.writer.add_scalar("validation/reward_mean", mean_reward, update_step)
-            self.writer.add_scalar("validation/length_mean", mean_length, update_step)
-            self.writer.add_scalar("validation/success_mean", mean_success, update_step)
+            if self.writer is not None:
+                self.writer.add_scalar("validation/reward_mean", results["reward_mean"], update_step)
+                self.writer.add_scalar("validation/length_mean", results["length_mean"], update_step)
+                self.writer.add_scalar("validation/success_mean", results["success_mean"], update_step)
             
-            print(f"Validation @ step {update_step}: Reward={mean_reward:.2f}, Length={mean_length:.1f}, Success={mean_success:.2f}")
+            print(f"Validation @ step {update_step}: Reward={results['reward_mean']:.2f}, Length={results['length_mean']:.1f}, Success={results['success_mean']:.2f}")
 
-        self.model.train()
+        model.train()
         print("--- Validation Complete ---\n")
+        return results
 
     def _sample_training_data(self) -> list:
-        # ... (Этот метод остается без изменений) ...
         episode_infos = []
         
         self.buffer.memories = [self.memory[w] for w in range(self.num_workers)]
@@ -258,24 +273,13 @@ class PPOTrainer:
         """
         with torch.no_grad():
             obs_tensor = torch.from_numpy(self.obs).to(self.device)
-            
-            # 1. Получаем правильные индексы для текущего шага
             indices_tensor = self.memory_indices[self.worker_current_episode_step]
-            
-            # 2. "Вырезаем" из полной памяти только нужное нам окно (slice)
             sliced_memory = batched_index_select(self.memory, 1, indices_tensor)
-
-            # 3. Получаем соответствующую маску
             mask_tensor = self.memory_mask[torch.clip(self.worker_current_episode_step, 0, self.memory_length - 1)]
-
-            # 4. Передаем в модель нарезанную память, а не всю.
-            #    Теперь размер sliced_memory и mask_tensor будет совпадать.
             _, last_value, _ = self.model(obs_tensor, sliced_memory, mask_tensor, indices_tensor)
-            
         return last_value
 
     def _train_epochs(self, learning_rate: float, clip_range: float, beta: float) -> tuple:
-        # ... (Этот метод остается без изменений) ...
         train_info, grad_info = [], {}
         if self.buffer.batch_size == 0:
             return train_info, grad_info
@@ -290,7 +294,6 @@ class PPOTrainer:
         return train_info, grad_info
 
     def _train_mini_batch(self, samples: dict, learning_rate: float, clip_range: float, beta: float) -> list:
-        # ... (Этот метод остается без изменений) ...
         memory = batched_index_select(samples["memories"], 1, samples["memory_indices"])
         policy, value, _ = self.model(samples["obs"], memory, samples["memory_mask"], samples["memory_indices"])
 
@@ -350,7 +353,6 @@ class PPOTrainer:
         self._write_gradient_summary(update, grad_info)
 
     def _write_training_summary(self, update, training_stats, episode_result):
-        # ... (Этот метод остается без изменений) ...
         if episode_result:
             for key in episode_result:
                 if "std" not in key:
@@ -367,28 +369,27 @@ class PPOTrainer:
             self.writer.add_scalar("training/advantage_mean", torch.mean(self.buffer.advantages), update)
         
     def _write_gradient_summary(self, update, grad_info):
-        # ... (Этот метод остается без изменений) ...
         for key, value in grad_info.items():
             if value:
                 self.writer.add_scalar(f"gradients/{key}", np.mean(value), update)
 
-    def _save_model(self):
-        # ... (Этот метод остается без изменений) ...
+    def _save_model(self, path: str):
+        """Сохраняет модель по указанному пути."""
         if not os.path.exists("./models"):
             os.makedirs("./models")
         
-        save_path = f"./models/{self.run_id}.nn"
-        pickle.dump((self.model.state_dict(), self.config), open(save_path, "wb"))
-        print(f"\nModel saved to {save_path}")
+        pickle.dump((self.model.state_dict(), self.config), open(path, "wb"))
+        print(f"Model saved to {path}")
 
     def close(self):
-        # ... (Этот метод остается без изменений) ...
+        """Закрывает воркеры и SummaryWriter."""
         print("Closing trainer and workers...")
         try:
             for worker in self.workers:
                 worker.child.send(("close", None))
-        except:
-            pass
+        except Exception as e:
+            print(f"Exception while closing workers: {e}")
         
-        self.writer.close()
+        if self.writer is not None:
+            self.writer.close()
         time.sleep(1.0)
