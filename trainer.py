@@ -86,13 +86,31 @@ class PPOTrainer:
             print(f"Checkpointing enabled. Tracking metric: '{self.metric_to_track}'. Best model will be saved to {self.best_model_path}")
 
     def _create_memory_indices(self) -> torch.Tensor:
-        """Создает тензор для индексации скользящего окна памяти."""
-        if self.max_episode_length <= self.memory_length:
-            return torch.arange(0, self.memory_length).unsqueeze(0).repeat(self.max_episode_length, 1).long()
+        """
+        Создает тензор для индексации скользящего окна памяти.
+        Эта версия исправлена и работает для любых соотношений
+        max_episode_length и memory_length.
+        """
+        max_len = self.max_episode_length
+        mem_len = self.memory_length
+        
+        # Создаем пустой тензор для хранения всех окон
+        indices_tensor = torch.zeros((max_len, mem_len), dtype=torch.long)
+        
+        for s in range(max_len):
+            # Определяем начало окна: либо 0, либо на mem_len шагов назад
+            start_idx = max(0, s - mem_len + 1)
+            # Определяем конец окна: текущий шаг
+            end_idx = s + 1
             
-        repetitions = torch.repeat_interleave(torch.arange(0, self.memory_length).unsqueeze(0), self.memory_length - 1, dim=0).long()
-        indices = torch.stack([torch.arange(i, i + self.memory_length) for i in range(self.max_episode_length - self.memory_length + 1)]).long()
-        return torch.cat((repetitions, indices))
+            # Создаем окно индексов для текущего шага
+            window = torch.arange(start_idx, end_idx)
+            
+            # Вставляем это окно в конец соответствующей строки в главном тензоре.
+            # Оставшееся место в начале будет заполнено нулями (padding).
+            indices_tensor[s, -len(window):] = window
+            
+        return indices_tensor
 
     def run_training(self) -> None:
         """Основной цикл обучения агента."""

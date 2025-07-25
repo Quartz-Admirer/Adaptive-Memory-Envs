@@ -73,6 +73,10 @@ def run():
         
         experiment_config = copy.deepcopy(base_config)
         update_dict(experiment_config, experiment["config_override"])
+
+        if 'validation' in experiment_config and 'env' in experiment_config['validation']:
+            experiment_config['validation']['env'] = experiment_config['train_env']
+
         experiment_config['run_id'] = experiment['run_id']
 
         try:
